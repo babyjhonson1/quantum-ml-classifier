@@ -1,5 +1,4 @@
-from qiskit import QuantumCircuit, transpile
-from qiskit_aer import AerSimulator
+from qiskit import QuantumCircuit
 from qiskit.quantum_info import Statevector, SparsePauliOp
 import numpy as np
 from scipy.optimize import minimize
@@ -11,15 +10,16 @@ OBS_OPERATOR = SparsePauliOp('IZ')
 def build_circuit(x, theta, n_layers):
     qc = QuantumCircuit(2)
 
-    qc.ry(x[0], 0)
-    qc.ry(x[1], 1)
-
     param_index = 0
     for i in range(n_layers):
+        qc.ry(x[0], 0)
+        qc.ry(x[1], 1)
+
         qc.ry(theta[param_index], 0)
         param_index += 1
         qc.ry(theta[param_index], 1)
         param_index += 1
+
         if i % 2 == 0:
             qc.cx(0, 1)
         else:
@@ -56,6 +56,32 @@ def predict_labels(X, theta, n_layers):
     prob = predict_prob(X, theta, n_layers)
     return (prob >= 0.5).astype(int)
 
+def plot_decision_boundary(X, y, theta, n_layers, output_path):
+    x_min, x_max = X[:, 0].min() - 0.2, X[:, 0].max() + 0.2
+    y_min, y_max = X[:, 1].min() - 0.2, X[:, 1].max() + 0.2
+
+    xx, yy = np.meshgrid(
+        np.linspace(x_min, x_max, 100),
+        np.linspace(y_min, y_max, 100)
+    )
+
+    grid = np.c_[xx.ravel(), yy.ravel()]
+
+    probs = predict_prob(grid, theta, n_layers)
+    probs = probs.reshape(xx.shape)
+
+    plt.figure(figsize=(6, 5))
+    plt.contourf(xx, yy, probs, levels=30, alpha=0.7)
+    plt.contour(xx, yy, probs, levels=[0.5], linewidths=2)
+
+    plt.scatter(X[:, 0], X[:, 1], c=y, edgecolors="k", s=35)
+
+    plt.title(f"Decision boundary, layers={n_layers}")
+    plt.colorbar(label="p(class=1)")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=200)
+    plt.close()
+
 
 data = np.load('data/moons.npz')
 X_train = data['X_train']
@@ -72,6 +98,7 @@ def objective(theta):
     #     print(f"iter: {len(loss_hist)}, loss = {loss_val: .5f}")
     return loss_val
 
+best_theta = []
 for n_layers in range(2, 10):
     init_theta = rng.uniform(-2*np.pi, 2*np.pi, 2 * n_layers)
 
@@ -84,16 +111,15 @@ for n_layers in range(2, 10):
         options={'maxiter': 200}
     )
 
-    best_theta = result.x
-    y_train_pred = predict_labels(X_train, best_theta, n_layers)
-    y_test_pred = predict_labels(X_test, best_theta, n_layers)
+    cur_theta = result.x
+    best_theta.append(cur_theta)
+    y_train_pred = predict_labels(X_train, cur_theta, n_layers)
+    y_test_pred = predict_labels(X_test, cur_theta, n_layers)
 
     train_acc = accuracy_score(y_train, y_train_pred)
     test_acc = accuracy_score(y_test, y_test_pred)
 
-    print("Optimization success:", result.success)
     print("Final loss:", result.fun)
-    print("Best theta:", best_theta)
     print(f"Quantum train accuracy: {train_acc:.4f}")
     print(f"Quantum test accuracy: {test_acc:.4f}")
 
@@ -103,4 +129,6 @@ for n_layers in range(2, 10):
     plt.ylabel("Binary cross-entropy")
     plt.title("Quantum classifier training loss")
     plt.tight_layout()
-    plt.savefig(f"figures/loss_{n_layers}_n_layers.png", dpi=200)
+    plt.savefig(f"figures/v2/loss_{n_layers}_n_layers.png", dpi=200)
+
+    plot_decision_boundary(X_test, y_test, best_theta[n_layers - 2], n_layers, f'figures/v2/decision_boundary_{n_layers}.png')
